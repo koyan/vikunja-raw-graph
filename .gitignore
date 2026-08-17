@@ -6,3 +6,6 @@ backups/
 
 # Claude Code local session state
 .claude/
+
+# Generated output
+raw-graph-export/data/
