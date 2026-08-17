@@ -1,0 +1,161 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: vikunja-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vikunja
+
+  redis:
+    image: redis:7-alpine
+    container_name: vikunja-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vikunja
+
+  api:
+    image: vikunja/vikunja:latest
+    container_name: vikunja-api
+    restart: unless-stopped
+    ports:
+      - "3456:3456"    
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      VIKUNJA_DATABASE_TYPE: postgres
+      VIKUNJA_DATABASE_HOST: db
+      VIKUNJA_DATABASE_USER: ${POSTGRES_USER}
+      VIKUNJA_DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      VIKUNJA_DATABASE_DATABASE: ${POSTGRES_DB}
+      VIKUNJA_REDIS_ENABLED: "1"
+      VIKUNJA_REDIS_HOST: "redis:6379"
+      VIKUNJA_SERVICE_JWTSECRET: ${JWT_SECRET}
+      VIKUNJA_SERVICE_PUBLICURL: ${PUBLIC_URL}
+      VIKUNJA_SERVICE_TIMEZONE: ${TIMEZONE}
+    volumes:
+      - vikunja-files:/app/vikunja/files
+    networks:
+      - vikunja
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: vikunja-caddy
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - vikunja
+
+  # Renders the actual GraphViz "dot" hierarchical layout (rankdir=LR) via
+  # Hochfrequenz's taskdependencygraph library, using kroki below to turn dot
+  # into SVG. Self-hosted (rather than the public kroki.io) so task titles
+  # never leave this network. Always-on (not "tools") since raw-graph-server
+  # below needs it available for arbitrary incoming requests, not just for
+  # the span of a single `make raw-graph` run.
+  kroki:
+    image: yuzutech/kroki:0.30.1
+    container_name: vikunja-kroki
+    restart: unless-stopped
+    depends_on:
+      - mermaid
+    environment:
+      KROKI_MERMAID_HOST: mermaid
+    ports:
+      - "8123:8000"
+    networks:
+      - vikunja
+
+  mermaid:
+    image: yuzutech/kroki-mermaid
+    container_name: vikunja-mermaid
+    restart: unless-stopped
+    networks:
+      - vikunja
+
+  # One-off CLI export for local/manual use (`make raw-graph`) -- writes
+  # ./raw-graph-export/data/raw_graph.svg. Never started by `make up`.
+  raw-graph-export:
+    build:
+      context: ./raw-graph-export
+    container_name: vikunja-raw-graph-export
+    profiles: ["tools"]
+    depends_on:
+      - api
+      - kroki
+    environment:
+      VIKUNJA_URL: http://api:3456
+      VIKUNJA_API_TOKEN: ${VIKUNJA_API_TOKEN}
+      VIKUNJA_USERNAME: ${VIKUNJA_USERNAME}
+      VIKUNJA_PASSWORD: ${VIKUNJA_PASSWORD}
+      KROKI_URL: http://kroki:8000
+    volumes:
+      - ./raw-graph-export/data:/data
+    networks:
+      - vikunja
+
+  # Same image, run as an always-on HTTP service instead of a one-off CLI:
+  # regenerates the SVG fresh on every GET and returns it directly, gated by
+  # HTTP Basic Auth (RAW_GRAPH_USERNAME/PASSWORD). Reverse-proxied by Caddy
+  # at /raw-graph -- see Caddyfile. Not published to the host directly; only
+  # reachable through Caddy.
+  raw-graph-server:
+    build:
+      context: ./raw-graph-export
+    container_name: vikunja-raw-graph-server
+    restart: unless-stopped
+    command: ["server.py"]
+    depends_on:
+      - api
+      - kroki
+    environment:
+      VIKUNJA_URL: http://api:3456
+      VIKUNJA_API_TOKEN: ${VIKUNJA_API_TOKEN}
+      VIKUNJA_USERNAME: ${VIKUNJA_USERNAME}
+      VIKUNJA_PASSWORD: ${VIKUNJA_PASSWORD}
+      KROKI_URL: http://kroki:8000
+      RAW_GRAPH_USERNAME: ${RAW_GRAPH_USERNAME}
+      RAW_GRAPH_PASSWORD: ${RAW_GRAPH_PASSWORD}
+    networks:
+      - vikunja
+
+networks:
+  vikunja:
+    driver: bridge
+
+volumes:
+  db-data:
+  redis-data:
+  vikunja-files:
+  caddy-data:
+  caddy-config:

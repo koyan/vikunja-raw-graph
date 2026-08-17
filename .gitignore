@@ -1,0 +1,8 @@
+# Real secrets -- copy env.example instead
+.env
+
+# Database dumps (personal task data)
+backups/
+
+# Claude Code local session state
+.claude/

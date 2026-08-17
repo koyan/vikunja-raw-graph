@@ -1,0 +1,8 @@
+{$DOMAIN} {
+    handle_path /raw-graph* {
+        reverse_proxy raw-graph-server:8000
+    }
+    handle {
+        reverse_proxy api:3456
+    }
+}
