@@ -172,6 +172,7 @@ def build_graph_inputs(tasks):
                 "assignee": assignee_display(task),
                 "label_text": label_text,
                 "label_color": label_color,
+                "done": bool(task.get("done")),
             }
 
     for task in tasks.values():
@@ -273,17 +274,25 @@ def build_dot(tdg, nodes, edges, node_meta):
     lines = ["digraph fahrplan{\nrankdir = LR;\nnode [shape=record fontname=Calibri];\n"]
     for node in ordered_nodes:
         meta = node_meta[node.id]
-        parts = [node.name]
+        name = f"✓ {node.name}" if meta["done"] else node.name
+        parts = [name]
         if meta["assignee"]:
             parts.append(meta["assignee"])
         if meta["label_text"]:
             parts.append(meta["label_text"])
         attributes = {"label": "|".join(escape_record_field(p) for p in parts)}
-        if meta["label_color"]:
+        if meta["done"]:
+            # Muted regardless of the responsibility label's color, and never
+            # flagged critical -- a finished task isn't a schedule risk anymore.
             attributes["style"] = "filled"
-            attributes["fillcolor"] = f"#{meta['label_color']}"
-        if tdg.is_on_critical_path(node.id):
-            attributes["color"] = "red"
+            attributes["fillcolor"] = "#e8e8e8"
+            attributes["fontcolor"] = "#8a8a8a"
+        else:
+            if meta["label_color"]:
+                attributes["style"] = "filled"
+                attributes["fillcolor"] = f"#{meta['label_color']}"
+            if tdg.is_on_critical_path(node.id):
+                attributes["color"] = "red"
         lines.append(node.to_dot(attributes))
     for edge in edges:
         lines.append(edge.to_dot())
