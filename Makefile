@@ -3,7 +3,7 @@ include .env
 export
 
 .PHONY: help up down restart stop start logs logs-api ps status pull update backup restore-help shell-db shell-api reset-password env-check \
-	raw-graph raw-graph-build raw-graph-clean raw-graph-server-logs
+	raw-graph raw-graph-build raw-graph-clean raw-graph-server-logs raw-graph-deploy
 
 RAW_GRAPH_DIR := raw-graph-export
 RAW_GRAPH_DATA := $(RAW_GRAPH_DIR)/data
@@ -30,6 +30,7 @@ help:
 	@echo "  make raw-graph-build       Build/update the raw-graph images"
 	@echo "  make raw-graph-clean       Remove raw-graph's generated output"
 	@echo "  make raw-graph-server-logs Tail logs for the always-on /raw-graph HTTP endpoint"
+	@echo "  make raw-graph-deploy      Rebuild + recreate raw-graph-server after a code change (e.g. after git pull)"
 	@echo ""
 	@echo "  The /raw-graph HTTP endpoint (raw-graph-server) starts with 'make up' like"
 	@echo "  the rest of the stack -- reachable via Caddy at https://<DOMAIN>/raw-graph,"
@@ -110,6 +111,14 @@ raw-graph-clean:
 
 raw-graph-server-logs:
 	docker compose logs -f raw-graph-server
+
+# `docker compose restart` alone won't pick up code changes -- it reuses the
+# existing image. `up -d` alone won't rebuild a stale image either. This does
+# both: rebuild from current source, then recreate just this one container
+# (db/redis/api/caddy/kroki/mermaid are left untouched).
+raw-graph-deploy: env-check
+	docker compose build raw-graph-export raw-graph-server
+	docker compose up -d raw-graph-server
 
 ssh:
 	ssh -t ${SERVER_USER}@${SERVER_IP} "cd ${SERVER_DIRECTORY} ; bash --login"

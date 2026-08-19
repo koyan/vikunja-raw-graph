@@ -195,6 +195,19 @@ def build_graph_inputs(tasks):
     return list(nodes.values()), list(edges.values()), finding_labels, node_meta
 
 
+def exclude_done_tasks(nodes, edges, node_meta):
+    """Drop done tasks from a build_graph_inputs() result, along with any edge
+    touching one -- an edge can't reference a node that's no longer there.
+    """
+    keep_ids = {node.id for node in nodes if not node_meta[node.id]["done"]}
+    filtered_nodes = [node for node in nodes if node.id in keep_ids]
+    filtered_edges = [
+        edge for edge in edges if edge.task_predecessor in keep_ids and edge.task_successor in keep_ids
+    ]
+    filtered_meta = {node_id: meta for node_id, meta in node_meta.items() if node_id in keep_ids}
+    return filtered_nodes, filtered_edges, filtered_meta
+
+
 def describe_finding(finding, finding_labels):
     task_desc = finding_labels.get(finding.task_id, finding.task_id) if finding.task_id else None
     if task_desc:
@@ -336,6 +349,7 @@ async def render_svg(nodes, edges, node_meta, kroki_host):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default="raw_graph.svg", help="Output SVG file path")
+    parser.add_argument("--hide-done", action="store_true", help="Exclude done tasks from the graph entirely")
     args = parser.parse_args()
 
     load_dotenv()
@@ -345,6 +359,9 @@ def main():
     session = get_session(base_url)
     tasks = fetch_all_tasks(session, base_url)
     nodes, edges, finding_labels, node_meta = build_graph_inputs(tasks)
+
+    if args.hide_done:
+        nodes, edges, node_meta = exclude_done_tasks(nodes, edges, node_meta)
 
     validation = TaskDependencyGraph.validate_definition(nodes, edges)
     if not validation.is_valid:

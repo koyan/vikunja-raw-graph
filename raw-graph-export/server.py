@@ -19,10 +19,13 @@ from taskdependencygraph.task_dependency_graph import TaskDependencyGraph
 from export_raw_graph import (
     build_graph_inputs,
     describe_finding,
+    exclude_done_tasks,
     fetch_all_tasks,
     get_session,
     render_svg,
 )
+
+_TRUTHY = {"1", "true", "yes"}
 
 
 def _check_auth(request):
@@ -63,6 +66,9 @@ async def handle_graph(request):
     session = await asyncio.to_thread(get_session, base_url)
     tasks = await asyncio.to_thread(fetch_all_tasks, session, base_url)
     nodes, edges, finding_labels, node_meta = build_graph_inputs(tasks)
+
+    if request.query.get("hide_done", "").lower() in _TRUTHY:
+        nodes, edges, node_meta = exclude_done_tasks(nodes, edges, node_meta)
 
     validation = TaskDependencyGraph.validate_definition(nodes, edges)
     if not validation.is_valid:
